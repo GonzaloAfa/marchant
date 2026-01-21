@@ -134,79 +134,91 @@ jobs:
           else
             echo "🌐 Creating CloudFront distribution..."
             
-            # Prepare aliases and SSL config
-            ALIASES_CONFIG=""
-            SSL_CONFIG=""
+            # Create base CloudFront config JSON using a heredoc with single quotes to avoid variable expansion issues
+            cat > /tmp/cloudfront-config-base.json <<'BASEJSON'
+{
+  "CallerReference": "TIMESTAMP_PLACEHOLDER",
+  "Comment": "BUCKET_NAME_PLACEHOLDER",
+  "DefaultRootObject": "index.html",
+  "Origins": {
+    "Quantity": 1,
+    "Items": [{
+      "Id": "S3-BUCKET_NAME_PLACEHOLDER",
+      "DomainName": "BUCKET_DOMAIN_PLACEHOLDER",
+      "OriginAccessControlId": "OAC_ID_PLACEHOLDER",
+      "S3OriginConfig": {
+        "OriginAccessIdentity": ""
+      }
+    }]
+  },
+  "DefaultCacheBehavior": {
+    "TargetOriginId": "S3-BUCKET_NAME_PLACEHOLDER",
+    "ViewerProtocolPolicy": "redirect-to-https",
+    "AllowedMethods": {
+      "Quantity": 2,
+      "Items": ["GET", "HEAD"],
+      "CachedMethods": {
+        "Quantity": 2,
+        "Items": ["GET", "HEAD"]
+      }
+    },
+    "ForwardedValues": {
+      "QueryString": false,
+      "Cookies": {"Forward": "none"}
+    },
+    "MinTTL": 0,
+    "DefaultTTL": 86400,
+    "MaxTTL": 31536000,
+    "Compress": true
+  },
+  "CustomErrorResponses": {
+    "Quantity": 2,
+    "Items": [
+      {
+        "ErrorCode": 404,
+        "ResponsePagePath": "/index.html",
+        "ResponseCode": "200",
+        "ErrorCachingMinTTL": 300
+      },
+      {
+        "ErrorCode": 403,
+        "ResponsePagePath": "/index.html",
+        "ResponseCode": "200",
+        "ErrorCachingMinTTL": 300
+      }
+    ]
+  },
+  "Enabled": true,
+  "PriceClass": "PriceClass_100"
+}
+BASEJSON
             
+            # Replace placeholders
+            sed -i "s|TIMESTAMP_PLACEHOLDER|$(date +%s)|g" /tmp/cloudfront-config-base.json
+            sed -i "s|BUCKET_NAME_PLACEHOLDER|${S3_BUCKET_NAME}|g" /tmp/cloudfront-config-base.json
+            sed -i "s|BUCKET_DOMAIN_PLACEHOLDER|${S3_BUCKET_NAME}.s3.${BUCKET_REGION}.amazonaws.com|g" /tmp/cloudfront-config-base.json
+            sed -i "s|OAC_ID_PLACEHOLDER|${OAC_ID}|g" /tmp/cloudfront-config-base.json
+            
+            # Add aliases and SSL if provided
             if [ -n "$DOMAIN_NAME" ] && [ -n "$ACM_CERT_ARN" ]; then
-              ALIASES_CONFIG='"Aliases": {"Quantity": 1, "Items": ["'${DOMAIN_NAME}'"]},'
-              SSL_CONFIG='"ViewerCertificate": {
-                "ACMCertificateArn": "'${ACM_CERT_ARN}'",
-                "SSLSupportMethod": "sni-only",
-                "MinimumProtocolVersion": "TLSv1.2_2021"
-              },"
+              # Use jq to add aliases and SSL config
+              jq \
+                --arg domain "$DOMAIN_NAME" \
+                --arg cert "$ACM_CERT_ARN" \
+                '. + {
+                  "Aliases": {
+                    "Quantity": 1,
+                    "Items": [$domain]
+                  },
+                  "ViewerCertificate": {
+                    "ACMCertificateArn": $cert,
+                    "SSLSupportMethod": "sni-only",
+                    "MinimumProtocolVersion": "TLSv1.2_2021"
+                  }
+                }' /tmp/cloudfront-config-base.json > /tmp/cloudfront-config.json
+            else
+              cp /tmp/cloudfront-config-base.json /tmp/cloudfront-config.json
             fi
-            
-            # Create CloudFront config
-            cat > /tmp/cloudfront-config.json <<EOF
-          {
-            "CallerReference": "$(date +%s)",
-            "Comment": "Distribution for ${S3_BUCKET_NAME}",
-            "DefaultRootObject": "index.html",
-            ${ALIASES_CONFIG}
-            "Origins": {
-              "Quantity": 1,
-              "Items": [{
-                "Id": "S3-${S3_BUCKET_NAME}",
-                "DomainName": "${S3_BUCKET_NAME}.s3.${BUCKET_REGION}.amazonaws.com",
-                "OriginAccessControlId": "${OAC_ID}",
-                "S3OriginConfig": {
-                  "OriginAccessIdentity": ""
-                }
-              }]
-            },
-            "DefaultCacheBehavior": {
-              "TargetOriginId": "S3-${S3_BUCKET_NAME}",
-              "ViewerProtocolPolicy": "redirect-to-https",
-              "AllowedMethods": {
-                "Quantity": 2,
-                "Items": ["GET", "HEAD"],
-                "CachedMethods": {
-                  "Quantity": 2,
-                  "Items": ["GET", "HEAD"]
-                }
-              },
-              "ForwardedValues": {
-                "QueryString": false,
-                "Cookies": {"Forward": "none"}
-              },
-              "MinTTL": 0,
-              "DefaultTTL": 86400,
-              "MaxTTL": 31536000,
-              "Compress": true
-            },
-            "CustomErrorResponses": {
-              "Quantity": 2,
-              "Items": [
-                {
-                  "ErrorCode": 404,
-                  "ResponsePagePath": "/index.html",
-                  "ResponseCode": "200",
-                  "ErrorCachingMinTTL": 300
-                },
-                {
-                  "ErrorCode": 403,
-                  "ResponsePagePath": "/index.html",
-                  "ResponseCode": "200",
-                  "ErrorCachingMinTTL": 300
-                }
-              ]
-            },
-            ${SSL_CONFIG}
-            "Enabled": true,
-            "PriceClass": "PriceClass_100"
-          }
-          EOF
             
             DIST_ID=$(aws cloudfront create-distribution \
               --distribution-config file:///tmp/cloudfront-config.json \
