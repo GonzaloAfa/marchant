@@ -72,7 +72,7 @@ marchant/
 ### Prerrequisitos
 
 - **Node.js** >= 18.x
-- **npm** o **yarn**
+- **Yarn** (gestor de paquetes utilizado en este proyecto)
 - **MongoDB** (local o MongoDB Atlas)
 - **Git**
 
@@ -99,18 +99,23 @@ Edita `.env` con tus valores (ver sección [Variables de Entorno](#-variables-de
 
 ### 3. Instalar Dependencias
 
+> **Nota**: Este proyecto usa **Yarn** como gestor de paquetes. Asegúrate de tener Yarn instalado:
+> ```bash
+> npm install -g yarn
+> ```
+
 #### Backend
 
 ```bash
 cd src/backend
-npm install
+yarn install
 ```
 
 #### Frontend
 
 ```bash
 cd src/frontend
-npm install
+yarn install
 ```
 
 ### 4. Configurar MongoDB
@@ -138,7 +143,7 @@ docker run --name marchant-mongo \
 
 ```bash
 cd src/backend
-npm run start:dev
+yarn start:dev
 ```
 
 Backend estará en: `http://localhost:3000`
@@ -149,7 +154,7 @@ Backend estará en: `http://localhost:3000`
 
 ```bash
 cd src/frontend
-npm run dev
+yarn dev
 ```
 
 Frontend estará en: `http://localhost:3001`
@@ -338,11 +343,11 @@ También puedes ejecutarlos manualmente desde **Actions** en GitHub.
 ```bash
 cd src/backend
 
-npm run start          # Iniciar en producción
-npm run start:dev      # Iniciar en desarrollo (watch mode)
-npm run build          # Compilar TypeScript
-npm run test           # Ejecutar tests
-npm run lint           # Linter
+yarn start             # Iniciar en producción
+yarn start:dev          # Iniciar en desarrollo (watch mode)
+yarn build              # Compilar TypeScript
+yarn test               # Ejecutar tests
+yarn lint               # Linter
 ```
 
 ### Frontend
@@ -350,10 +355,10 @@ npm run lint           # Linter
 ```bash
 cd src/frontend
 
-npm run dev            # Iniciar en desarrollo
-npm run build          # Build para producción
-npm run preview        # Preview del build
-npm run lint           # Linter
+yarn dev                # Iniciar en desarrollo
+yarn build              # Build para producción
+yarn preview            # Preview del build
+yarn lint               # Linter
 ```
 
 ## 🧪 Testing
@@ -361,11 +366,11 @@ npm run lint           # Linter
 ```bash
 # Backend
 cd src/backend
-npm test
+yarn test
 
 # Frontend
 cd src/frontend
-npm test
+yarn test
 ```
 
 ## 🤝 Contribuir

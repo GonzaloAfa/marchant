@@ -2,6 +2,8 @@
 
 Este documento lista todos los secrets que debes configurar en GitHub para que los workflows de despliegue funcionen correctamente.
 
+> **Nota**: Este proyecto usa **Yarn** como gestor de paquetes. Los workflows de GitHub Actions están configurados para usar Yarn automáticamente.
+
 ## 📍 Ubicación
 
 Ve a tu repositorio en GitHub:

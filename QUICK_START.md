@@ -3,7 +3,12 @@
 ## ✅ Lo que acabamos de crear
 
 1. **Backend Node.js/Nest.js + MongoDB** - API serverless-ready
-2. **Landing Page React** - Página de inicio profesional
+2. **Frontend React** - Página de inicio profesional
+
+> **Nota**: Este proyecto usa **Yarn** como gestor de paquetes. Asegúrate de tener Yarn instalado:
+> ```bash
+> yarn install -g yarn
+> ```
 
 ---
 
@@ -15,16 +20,16 @@
 cd src/backend
 
 # Instalar dependencias
-npm install
+yarn install
 
 # Copiar archivo de configuración
 cp .env.example .env
 
 # Editar .env con tus credenciales
-# (MONGODB_URI, JWT_SECRET, OPENAI_API_KEY, etc.)
+# (MONGODB_URI, JWT_SECRET, etc.)
 
 # Desarrollo
-npm run start:dev
+yarn start:dev
 
 # La API estará en http://localhost:3000
 # Swagger docs en http://localhost:3000/api/docs
@@ -36,10 +41,10 @@ npm run start:dev
 cd src/frontend
 
 # Instalar dependencias
-npm install
+yarn install
 
 # Desarrollo
-npm run dev
+yarn dev
 
 # El frontend estará en http://localhost:3001
 ```
@@ -99,8 +104,8 @@ OPENAI_API_KEY=tu-api-key
 
 ```bash
 cd src/frontend
-npm install
-npm run dev
+yarn install
+yarn dev
 ```
 
 Abre http://localhost:3001 y verás:
@@ -113,8 +118,8 @@ Abre http://localhost:3001 y verás:
 
 ```bash
 cd src/backend
-npm install
-npm run start:dev
+yarn install
+yarn start:dev
 ```
 
 Abre http://localhost:3000/api/docs para ver Swagger UI
@@ -162,7 +167,7 @@ src/
 cd src/backend
 
 # Instalar Vercel CLI
-npm i -g vercel
+yarn global add vercel
 
 # Login
 vercel login
@@ -181,7 +186,7 @@ vercel
 
 ```bash
 cd src/frontend
-npm run build
+yarn build
 
 # Deploy a Vercel
 vercel
@@ -295,8 +300,8 @@ docker ps | grep mongo
 ### Error: Cannot find module
 ```bash
 # Reinstalar dependencias
-rm -rf node_modules package-lock.json
-npm install
+rm -rf node_modules yarn.lock
+yarn install
 ```
 
 ### Error: Port already in use

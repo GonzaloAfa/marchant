@@ -27,16 +27,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: src/backend/package-lock.json
+          cache: 'yarn'
+          cache-dependency-path: src/backend/yarn.lock
 
       - name: Install dependencies
         working-directory: ./src/backend
-        run: npm ci
+        run: yarn install --frozen-lockfile
 
       - name: Build backend
         working-directory: ./src/backend
-        run: npm run build
+        run: yarn build
         env:
           NODE_ENV: production
 
@@ -48,11 +48,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Install Serverless Framework
-        run: npm install -g serverless
-
-      - name: Install backend dependencies
-        working-directory: ./src/backend
-        run: npm install
+        run: yarn global add serverless || npm install -g serverless
 
       - name: Deploy to Lambda
         working-directory: ./src/backend
