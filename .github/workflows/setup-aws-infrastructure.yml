@@ -1,0 +1,410 @@
+name: Setup AWS Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      setup_infrastructure:
+        description: 'Setup S3 + CloudFront infrastructure'
+        required: false
+        default: 'true'
+        type: boolean
+      deploy_frontend:
+        description: 'Deploy frontend to S3'
+        required: false
+        default: 'true'
+        type: boolean
+      deploy_backend:
+        description: 'Deploy backend to Lambda'
+        required: false
+        default: 'true'
+        type: boolean
+
+env:
+  NODE_VERSION: '18.x'
+  AWS_REGION: us-east-1
+
+jobs:
+  setup-infrastructure:
+    name: Setup AWS Infrastructure (S3 + CloudFront)
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.setup_infrastructure != 'false' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup AWS CLI
+        run: |
+          # AWS CLI should already be available in GitHub Actions
+          aws --version
+
+      - name: Create S3 bucket if not exists
+        run: |
+          set -e
+          BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
+          
+          # Check if bucket exists
+          if aws s3 ls "s3://${BUCKET_NAME}" 2>&1 | grep -q 'NoSuchBucket'; then
+            echo "📦 Creating S3 bucket: ${BUCKET_NAME}"
+            aws s3 mb "s3://${BUCKET_NAME}" --region ${{ env.AWS_REGION }}
+            echo "✅ Bucket created"
+          else
+            echo "✅ Bucket already exists"
+          fi
+
+      - name: Configure S3 bucket
+        run: |
+          set -e
+          BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
+          
+          # Enable Block Public Access (best practice)
+          aws s3api put-public-access-block \
+            --bucket "${BUCKET_NAME}" \
+            --public-access-block-configuration \
+            "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true" \
+            2>/dev/null || echo "⚠️  Could not update Block Public Access (may already be configured)"
+
+      - name: Create Origin Access Control (OAC)
+        id: create_oac
+        run: |
+          set -e
+          BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
+          OAC_NAME="OAC-${BUCKET_NAME}"
+          
+          # Check if OAC exists
+          EXISTING_OAC=$(aws cloudfront list-origin-access-controls \
+            --query "OriginAccessControlList.Items[?Name=='${OAC_NAME}'].Id" \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -n "$EXISTING_OAC" ] && [ "$EXISTING_OAC" != "None" ]; then
+            echo "✅ OAC already exists: ${EXISTING_OAC}"
+            echo "oac_id=${EXISTING_OAC}" >> $GITHUB_OUTPUT
+          else
+            echo "🔐 Creating Origin Access Control..."
+            OAC_ID=$(aws cloudfront create-origin-access-control \
+              --origin-access-control-config \
+              "Name=${OAC_NAME},OriginAccessControlOriginType=s3,SigningBehavior=always,SigningProtocol=sigv4" \
+              --query 'OriginAccessControl.Id' \
+              --output text)
+            echo "✅ OAC created: ${OAC_ID}"
+            echo "oac_id=${OAC_ID}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get bucket region
+        id: bucket_region
+        run: |
+          BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
+          BUCKET_REGION=$(aws s3api get-bucket-location \
+            --bucket "${BUCKET_NAME}" \
+            --query 'LocationConstraint' \
+            --output text 2>/dev/null || echo "${{ env.AWS_REGION }}")
+          
+          if [ "$BUCKET_REGION" = "None" ] || [ -z "$BUCKET_REGION" ]; then
+            BUCKET_REGION="${{ env.AWS_REGION }}"
+          fi
+          
+          echo "region=${BUCKET_REGION}" >> $GITHUB_OUTPUT
+          echo "📍 Bucket region: ${BUCKET_REGION}"
+
+      - name: Create or update CloudFront distribution
+        id: cloudfront
+        run: |
+          set -e
+          BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
+          OAC_ID="${{ steps.create_oac.outputs.oac_id }}"
+          BUCKET_REGION="${{ steps.bucket_region.outputs.region }}"
+          DOMAIN_NAME="${{ secrets.DOMAIN_NAME }}"
+          ACM_CERT_ARN="${{ secrets.ACM_CERTIFICATE_ARN }}"
+          
+          # Check if distribution exists
+          EXISTING_DIST=$(aws cloudfront list-distributions \
+            --query "DistributionList.Items[?Origins.Items[?contains(DomainName, '${BUCKET_NAME}.s3')]].Id" \
+            --output text | head -n 1 || echo "")
+          
+          if [ -n "$EXISTING_DIST" ] && [ "$EXISTING_DIST" != "None" ]; then
+            echo "✅ CloudFront distribution already exists: ${EXISTING_DIST}"
+            echo "distribution_id=${EXISTING_DIST}" >> $GITHUB_OUTPUT
+          else
+            echo "🌐 Creating CloudFront distribution..."
+            
+            # Prepare aliases and SSL config
+            ALIASES_CONFIG=""
+            SSL_CONFIG=""
+            
+            if [ -n "$DOMAIN_NAME" ] && [ -n "$ACM_CERT_ARN" ]; then
+              ALIASES_CONFIG='"Aliases": {"Quantity": 1, "Items": ["'${DOMAIN_NAME}'"]},'
+              SSL_CONFIG='"ViewerCertificate": {
+                "ACMCertificateArn": "'${ACM_CERT_ARN}'",
+                "SSLSupportMethod": "sni-only",
+                "MinimumProtocolVersion": "TLSv1.2_2021"
+              },"
+            fi
+            
+            # Create CloudFront config
+            cat > /tmp/cloudfront-config.json <<EOF
+          {
+            "CallerReference": "$(date +%s)",
+            "Comment": "Distribution for ${BUCKET_NAME}",
+            "DefaultRootObject": "index.html",
+            ${ALIASES_CONFIG}
+            "Origins": {
+              "Quantity": 1,
+              "Items": [{
+                "Id": "S3-${BUCKET_NAME}",
+                "DomainName": "${BUCKET_NAME}.s3.${BUCKET_REGION}.amazonaws.com",
+                "OriginAccessControlId": "${OAC_ID}",
+                "S3OriginConfig": {
+                  "OriginAccessIdentity": ""
+                }
+              }]
+            },
+            "DefaultCacheBehavior": {
+              "TargetOriginId": "S3-${BUCKET_NAME}",
+              "ViewerProtocolPolicy": "redirect-to-https",
+              "AllowedMethods": {
+                "Quantity": 2,
+                "Items": ["GET", "HEAD"],
+                "CachedMethods": {
+                  "Quantity": 2,
+                  "Items": ["GET", "HEAD"]
+                }
+              },
+              "ForwardedValues": {
+                "QueryString": false,
+                "Cookies": {"Forward": "none"}
+              },
+              "MinTTL": 0,
+              "DefaultTTL": 86400,
+              "MaxTTL": 31536000,
+              "Compress": true
+            },
+            "CustomErrorResponses": {
+              "Quantity": 2,
+              "Items": [
+                {
+                  "ErrorCode": 404,
+                  "ResponsePagePath": "/index.html",
+                  "ResponseCode": "200",
+                  "ErrorCachingMinTTL": 300
+                },
+                {
+                  "ErrorCode": 403,
+                  "ResponsePagePath": "/index.html",
+                  "ResponseCode": "200",
+                  "ErrorCachingMinTTL": 300
+                }
+              ]
+            },
+            ${SSL_CONFIG}
+            "Enabled": true,
+            "PriceClass": "PriceClass_100"
+          }
+          EOF
+            
+            DIST_ID=$(aws cloudfront create-distribution \
+              --distribution-config file:///tmp/cloudfront-config.json \
+              --query 'Distribution.Id' \
+              --output text)
+            
+            echo "✅ CloudFront distribution created: ${DIST_ID}"
+            echo "distribution_id=${DIST_ID}" >> $GITHUB_OUTPUT
+            
+            # Apply bucket policy
+            echo "📝 Applying bucket policy for OAC..."
+            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            DIST_ARN="arn:aws:cloudfront::${ACCOUNT_ID}:distribution/${DIST_ID}"
+            
+            cat > /tmp/bucket-policy.json <<EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Sid": "AllowCloudFrontServicePrincipal",
+              "Effect": "Allow",
+              "Principal": {"Service": "cloudfront.amazonaws.com"},
+              "Action": "s3:GetObject",
+              "Resource": "arn:aws:s3:::${BUCKET_NAME}/*",
+              "Condition": {
+                "StringEquals": {
+                  "AWS:SourceArn": "${DIST_ARN}"
+                }
+              }
+            }]
+          }
+          EOF
+            
+            # Temporarily disable BlockPublicPolicy to apply policy
+            aws s3api put-public-access-block \
+              --bucket "${BUCKET_NAME}" \
+              --public-access-block-configuration \
+              "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=false,RestrictPublicBuckets=true" \
+              2>/dev/null || true
+            
+            # Apply policy
+            if aws s3api put-bucket-policy \
+              --bucket "${BUCKET_NAME}" \
+              --policy file:///tmp/bucket-policy.json 2>/dev/null; then
+              echo "✅ Bucket policy applied"
+              
+              # Re-enable BlockPublicPolicy
+              aws s3api put-public-access-block \
+                --bucket "${BUCKET_NAME}" \
+                --public-access-block-configuration \
+                "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true" \
+                2>/dev/null || true
+            else
+              echo "⚠️  Could not apply bucket policy automatically"
+              echo "💡 You may need to apply it manually from AWS Console"
+            fi
+          fi
+
+      - name: Output CloudFront info
+        run: |
+          DIST_ID="${{ steps.cloudfront.outputs.distribution_id }}"
+          if [ -n "$DIST_ID" ]; then
+            CLOUDFRONT_DOMAIN=$(aws cloudfront get-distribution --id "$DIST_ID" \
+              --query 'Distribution.DomainName' \
+              --output text 2>/dev/null || echo "N/A")
+            
+            echo "✅ Infrastructure setup complete!"
+            echo "📦 S3 Bucket: ${{ secrets.S3_BUCKET_NAME }}"
+            echo "🌐 CloudFront Distribution ID: ${DIST_ID}"
+            echo "🔗 CloudFront Domain: ${CLOUDFRONT_DOMAIN}"
+            echo ""
+            echo "💡 Add this to GitHub Secrets:"
+            echo "   CLOUDFRONT_DISTRIBUTION_ID=${DIST_ID}"
+            echo ""
+            echo "⏳ CloudFront may take 15-20 minutes to fully deploy"
+          fi
+
+  deploy-frontend:
+    name: Deploy Frontend to S3
+    runs-on: ubuntu-latest
+    needs: setup-infrastructure
+    if: ${{ github.event.inputs.deploy_frontend != 'false' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: src/frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./src/frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: ./src/frontend
+        run: npm run build
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL || 'https://api.marchant.com/api/v1' }}
+          NODE_ENV: production
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to S3
+        run: |
+          # Sync static assets with long cache
+          aws s3 sync ./src/frontend/dist s3://${{ secrets.S3_BUCKET_NAME }} \
+            --delete \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "*.html" \
+            --exclude "*.json"
+          
+          # Upload HTML files with no cache
+          aws s3 sync ./src/frontend/dist s3://${{ secrets.S3_BUCKET_NAME }} \
+            --delete \
+            --cache-control "public, max-age=0, must-revalidate" \
+            --include "*.html" \
+            --include "*.json"
+
+      - name: Invalidate CloudFront cache
+        if: secrets.CLOUDFRONT_DISTRIBUTION_ID != ''
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
+
+      - name: Output deployment info
+        run: |
+          echo "✅ Frontend deployed to S3"
+          echo "Bucket: ${{ secrets.S3_BUCKET_NAME }}"
+          if [ -n "${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}" ]; then
+            echo "CloudFront Distribution: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}"
+          fi
+
+  deploy-backend:
+    name: Deploy Backend to Lambda
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.deploy_backend != 'false' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: src/backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./src/backend
+        run: npm ci
+
+      - name: Build backend
+        working-directory: ./src/backend
+        run: npm run build
+        env:
+          NODE_ENV: production
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install Serverless Framework
+        run: npm install -g serverless
+
+      - name: Deploy to Lambda
+        working-directory: ./src/backend
+        run: |
+          serverless deploy --stage production \
+            --region ${{ env.AWS_REGION }} \
+            --verbose
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_EXPIRES_IN: ${{ secrets.JWT_EXPIRES_IN || '24h' }}
+          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL || 'noreply@marchant.com' }}
+          FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+          NODE_ENV: production
+          ALLOWED_ORIGINS: ${{ secrets.ALLOWED_ORIGINS || '' }}
+          LOG_LEVEL: ${{ secrets.LOG_LEVEL || 'info' }}
+
+      - name: Output deployment info
+        run: |
+          echo "✅ Backend deployed to AWS Lambda"
+          echo "Region: ${{ env.AWS_REGION }}"
