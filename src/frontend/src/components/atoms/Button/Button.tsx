@@ -33,7 +33,7 @@ interface ButtonAsAnchor extends BaseButtonProps, Omit<React.AnchorHTMLAttribute
 type ButtonProps = ButtonAsButton | ButtonAsLink | ButtonAsAnchor
 
 export default function Button(props: ButtonProps) {
-  const { variant = 'primary', children, className = '', disabled, ...rest } = props
+  const { variant = 'primary', children, className = '', disabled } = props
 
   const baseClasses = 'px-6 py-3 rounded-lg font-semibold transition-all duration-200 inline-flex items-center justify-center gap-2 relative z-10 disabled:opacity-50 disabled:cursor-not-allowed'
   

@@ -76,7 +76,7 @@ export class LoggerService implements NestLoggerService {
     return `${colors.dim}${timestamp}${colors.reset} ${color}${colors.bright}[${level.toUpperCase()}]${colors.reset}${color}${contextStr}${colors.reset} ${message}${argsStr}`;
   }
 
-  private log(level: LogLevel, levelName: string, message: string, context?: string, ...args: any[]): void {
+  private logInternal(level: LogLevel, levelName: string, message: string, context?: string, ...args: any[]): void {
     if (!this.shouldLog(level)) {
       return;
     }
@@ -94,19 +94,19 @@ export class LoggerService implements NestLoggerService {
   }
 
   error(message: string, context?: string, ...args: any[]): void {
-    this.log(LogLevel.ERROR, 'error', message, context, ...args);
+    this.logInternal(LogLevel.ERROR, 'error', message, context, ...args);
   }
 
   warn(message: string, context?: string, ...args: any[]): void {
-    this.log(LogLevel.WARN, 'warn', message, context, ...args);
+    this.logInternal(LogLevel.WARN, 'warn', message, context, ...args);
   }
 
   info(message: string, context?: string, ...args: any[]): void {
-    this.log(LogLevel.INFO, 'info', message, context, ...args);
+    this.logInternal(LogLevel.INFO, 'info', message, context, ...args);
   }
 
   debug(message: string, context?: string, ...args: any[]): void {
-    this.log(LogLevel.DEBUG, 'debug', message, context, ...args);
+    this.logInternal(LogLevel.DEBUG, 'debug', message, context, ...args);
   }
 
   log(message: string, context?: string, ...args: any[]): void {
