@@ -1,0 +1,48 @@
+service: marchant-backend
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: ${opt:region, 'us-east-1'}
+  stage: ${opt:stage, 'dev'}
+  memorySize: 512
+  timeout: 30
+  environment:
+    NODE_ENV: production
+    MONGODB_URI: ${env:MONGODB_URI}
+    JWT_SECRET: ${env:JWT_SECRET}
+    JWT_EXPIRES_IN: ${env:JWT_EXPIRES_IN, '24h'}
+    AWS_REGION: ${env:AWS_REGION, 'us-east-1'}
+    AWS_ACCESS_KEY_ID: ${env:AWS_ACCESS_KEY_ID, ''}
+    AWS_SECRET_ACCESS_KEY: ${env:AWS_SECRET_ACCESS_KEY, ''}
+    FROM_EMAIL: ${env:FROM_EMAIL, 'noreply@marchant.com'}
+    FRONTEND_URL: ${env:FRONTEND_URL}
+    ALLOWED_ORIGINS: ${env:ALLOWED_ORIGINS, ''}
+  httpApi:
+    cors: true
+
+functions:
+  api:
+    handler: dist/serverless.handler
+    events:
+      - httpApi:
+          path: /{proxy+}
+          method: ANY
+      - httpApi:
+          path: /
+          method: ANY
+
+plugins:
+  - serverless-offline
+
+package:
+  patterns:
+    - '!src/**'
+    - '!*.ts'
+    - '!tsconfig.json'
+    - '!nest-cli.json'
+    - 'dist/**'
+    - 'node_modules/**'
+    - 'package.json'

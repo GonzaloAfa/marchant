@@ -1,0 +1,221 @@
+name: Setup AWS Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      s3_bucket_name:
+        description: 'S3 Bucket Name'
+        required: true
+        default: 'alisonvivanco-web'
+      aws_region:
+        description: 'AWS Region (default: us-east-1 for CloudFront compatibility)'
+        required: false
+        default: 'us-east-1'
+      domain_name:
+        description: 'Custom Domain Name (optional)'
+        required: false
+        default: 'alisonvivanco.cl'
+      skip_ssl:
+        description: 'Skip SSL certificate configuration (use if certificate not ready)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  AWS_REGION: ${{ github.event.inputs.aws_region || 'us-east-1' }}
+  S3_BUCKET_NAME: ${{ github.event.inputs.s3_bucket_name }}
+  DOMAIN_NAME: ${{ github.event.inputs.domain_name || '' }}
+  SKIP_SSL: ${{ github.event.inputs.skip_ssl }}
+
+jobs:
+  validate:
+    name: Validate Prerequisites
+    runs-on: ubuntu-latest
+    outputs:
+      has_ssl: ${{ steps.check-secrets.outputs.has_ssl }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Validate AWS credentials
+        run: |
+          echo "🔐 Verificando credenciales de AWS..."
+          if aws sts get-caller-identity > /dev/null 2>&1; then
+            echo "✅ Credenciales válidas"
+            aws sts get-caller-identity
+          else
+            echo "❌ Error: Credenciales de AWS inválidas"
+            exit 1
+          fi
+
+      - name: Check required secrets
+        id: check-secrets
+        run: |
+          if [ -n "${{ secrets.ACM_CERTIFICATE_ARN }}" ] && [ "${{ env.SKIP_SSL }}" != "true" ]; then
+            echo "has_ssl=true" >> $GITHUB_OUTPUT
+            echo "✅ Certificado SSL encontrado"
+          else
+            echo "has_ssl=false" >> $GITHUB_OUTPUT
+            if [ "${{ env.SKIP_SSL }}" = "true" ]; then
+              echo "⚠️  SSL será omitido (skip_ssl=true)"
+            else
+              echo "⚠️  No se encontró ACM_CERTIFICATE_ARN - se creará distribución sin SSL"
+            fi
+          fi
+
+  setup-infrastructure:
+    name: Setup AWS Infrastructure
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install/Update AWS CLI
+        run: |
+          if command -v aws &> /dev/null; then
+            echo "🔄 AWS CLI ya está instalado, verificando versión..."
+            CURRENT_VERSION=$(aws --version 2>&1 | cut -d' ' -f1 | cut -d'/' -f2)
+            echo "Versión actual: $CURRENT_VERSION"
+            
+            # Solo actualizar si es necesario (opcional, puede comentarse para ahorrar tiempo)
+            # echo "Actualizando AWS CLI..."
+            # curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            # unzip -q awscliv2.zip
+            # sudo ./aws/install --update
+            # rm -rf awscliv2.zip aws
+          else
+            echo "📦 Instalando AWS CLI..."
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip -q awscliv2.zip
+            sudo ./aws/install
+            rm -rf awscliv2.zip aws
+          fi
+          aws --version
+
+      - name: Setup S3 Bucket
+        id: setup-s3
+        run: |
+          chmod +x scripts/setup-aws-infrastructure.sh
+          echo "📦 Configurando bucket S3..."
+          S3_BUCKET_NAME="${{ env.S3_BUCKET_NAME }}" \
+          AWS_REGION="${{ env.AWS_REGION }}" \
+          ./scripts/setup-aws-infrastructure.sh 2>&1 | tee /tmp/setup-output.log || {
+            # Si falla, verificar si es porque el bucket ya existe
+            if grep -q "BucketAlreadyExists\|OperationAborted" /tmp/setup-output.log; then
+              echo "⚠️  Bucket puede estar en proceso de creación/eliminación"
+              echo "💡 Esperando 10 segundos y verificando..."
+              sleep 10
+              if aws s3 ls "s3://${{ env.S3_BUCKET_NAME }}" 2>&1 | grep -vq 'NoSuchBucket'; then
+                echo "✅ Bucket existe"
+                echo "bucket_exists=true" >> $GITHUB_OUTPUT
+              else
+                echo "❌ Bucket no existe después de esperar"
+                exit 1
+              fi
+            else
+              exit 1
+            fi
+          }
+          echo "bucket_exists=true" >> $GITHUB_OUTPUT
+
+      - name: Setup CloudFront Distribution
+        id: setup-cloudfront
+        run: |
+          echo "🌐 Configurando CloudFront..."
+          S3_BUCKET_NAME="${{ env.S3_BUCKET_NAME }}" \
+          AWS_REGION="${{ env.AWS_REGION }}" \
+          DOMAIN_NAME="${{ env.DOMAIN_NAME }}" \
+          ACM_CERTIFICATE_ARN="${{ secrets.ACM_CERTIFICATE_ARN }}" \
+          ./scripts/setup-aws-infrastructure.sh 2>&1 | tee /tmp/cloudfront-output.log
+          
+          # Extraer Distribution ID del output
+          DIST_ID=$(grep -oP 'CLOUDFRONT_DISTRIBUTION_ID=\K[^[:space:]]+' /tmp/cloudfront-output.log | head -n 1 || \
+            aws cloudfront list-distributions \
+              --query "DistributionList.Items[?Origins.Items[?contains(DomainName, '${{ env.S3_BUCKET_NAME }}.s3')]].Id" \
+              --output text | head -n 1)
+          
+          if [ -n "$DIST_ID" ] && [ "$DIST_ID" != "None" ]; then
+            echo "distribution_id=$DIST_ID" >> $GITHUB_OUTPUT
+            echo "✅ Distribution ID: $DIST_ID"
+          else
+            echo "❌ No se pudo obtener Distribution ID"
+            exit 1
+          fi
+
+      - name: Get CloudFront Domain Name
+        id: cloudfront-domain
+        run: |
+          DIST_ID="${{ steps.setup-cloudfront.outputs.distribution_id }}"
+          if [ -n "$DIST_ID" ]; then
+            DOMAIN=$(aws cloudfront get-distribution --id "$DIST_ID" \
+              --query 'Distribution.DomainName' \
+              --output text)
+            echo "domain_name=$DOMAIN" >> $GITHUB_OUTPUT
+            echo "🌐 CloudFront Domain: $DOMAIN"
+          fi
+
+      - name: Verify Distribution Status
+        run: |
+          DIST_ID="${{ steps.setup-cloudfront.outputs.distribution_id }}"
+          STATUS=$(aws cloudfront get-distribution --id "$DIST_ID" \
+            --query 'Distribution.Status' \
+            --output text)
+          
+          echo "📊 Estado de la distribución: $STATUS"
+          
+          if [ "$STATUS" = "Deployed" ]; then
+            echo "✅ Distribución completamente desplegada"
+          else
+            echo "⏳ Distribución en proceso de despliegue (puede tardar 15-20 minutos)"
+            echo "💡 Puedes verificar el estado con:"
+            echo "   aws cloudfront get-distribution --id $DIST_ID --query 'Distribution.Status'"
+          fi
+
+      - name: Output Summary
+        run: |
+          echo "## 📋 Resumen de Infraestructura" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ Recursos Creados/Verificados" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **S3 Bucket**: \`${{ env.S3_BUCKET_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Región**: \`${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **CloudFront Distribution ID**: \`${{ steps.setup-cloudfront.outputs.distribution_id }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **CloudFront Domain**: \`${{ steps.cloudfront-domain.outputs.domain_name }}\`" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ env.DOMAIN_NAME }}" ]; then
+            echo "- **Dominio Personalizado**: \`${{ env.DOMAIN_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔑 Secrets Requeridos en GitHub" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Asegúrate de tener estos secrets configurados:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. \`AWS_ACCESS_KEY_ID\` ✅" >> $GITHUB_STEP_SUMMARY
+          echo "2. \`AWS_SECRET_ACCESS_KEY\` ✅" >> $GITHUB_STEP_SUMMARY
+          echo "3. \`S3_BUCKET_NAME\` = \`${{ env.S3_BUCKET_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "4. \`CLOUDFRONT_DISTRIBUTION_ID\` = \`${{ steps.setup-cloudfront.outputs.distribution_id }}\`" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.validate.outputs.has_ssl }}" = "true" ]; then
+            echo "5. \`ACM_CERTIFICATE_ARN\` ✅ (configurado)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "5. \`ACM_CERTIFICATE_ARN\` ⚠️ (opcional - agregar después para SSL)" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📝 Próximos Pasos" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. Agrega los secrets faltantes en GitHub (Settings → Secrets and variables → Actions)" >> $GITHUB_STEP_SUMMARY
+          echo "2. Configura el DNS para apuntar a CloudFront (ver \`docs/DOMAIN-SETUP.md\`)" >> $GITHUB_STEP_SUMMARY
+          echo "3. Ejecuta el workflow de deploy para subir el sitio" >> $GITHUB_STEP_SUMMARY
