@@ -1,5 +1,4 @@
 import { CheckCircle, Loader2 } from 'lucide-react'
-import { Link } from 'react-router-dom'
 import Heading from '../../atoms/Heading'
 import Text from '../../atoms/Text'
 import Button from '../../atoms/Button'

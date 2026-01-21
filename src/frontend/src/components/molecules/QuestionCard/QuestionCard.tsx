@@ -1,6 +1,5 @@
 import { HTMLAttributes } from 'react'
 import Heading from '../../atoms/Heading'
-import Button from '../../atoms/Button'
 
 interface QuestionCardProps extends HTMLAttributes<HTMLDivElement> {
   question: string

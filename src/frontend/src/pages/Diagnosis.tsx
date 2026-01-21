@@ -1,16 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
-import { ArrowLeft } from 'lucide-react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import { leadsService } from '../services/api'
-import PageLayout from '../components/templates/PageLayout'
 import Header from '../components/organisms/Header'
 import ProgressBar from '../components/molecules/ProgressBar'
 import Alert from '../components/molecules/Alert'
 import QuestionCard from '../components/molecules/QuestionCard'
 import EmailCapture from '../components/organisms/EmailCapture'
 import DiagnosisResults from '../components/organisms/DiagnosisResults'
-import Button from '../components/atoms/Button'
 
 const questions = [
   {
@@ -69,7 +66,6 @@ export default function Diagnosis() {
 
   const currentQuestion = step > 0 ? questions[step - 1] : null
   const isLastQuestion = step === questions.length
-  const progress = step > 0 ? Math.round((step / questions.length) * 100) : 0
 
   // Scroll to top when question changes
   useEffect(() => {

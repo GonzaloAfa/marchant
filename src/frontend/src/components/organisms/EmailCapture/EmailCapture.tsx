@@ -1,5 +1,5 @@
 import { FormEvent, useRef, useEffect } from 'react'
-import { Mail, ArrowRight, Loader2, Phone } from 'lucide-react'
+import { Mail, ArrowRight, Loader2 } from 'lucide-react'
 import Heading from '../../atoms/Heading'
 import Text from '../../atoms/Text'
 import Input from '../../atoms/Input'

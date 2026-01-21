@@ -5,27 +5,29 @@ type ButtonVariant = 'primary' | 'secondary' | 'outline'
 
 interface BaseButtonProps {
   variant?: ButtonVariant
-  children: ReactNode
   className?: string
   disabled?: boolean
 }
 
-interface ButtonAsButton extends BaseButtonProps, Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className'> {
+interface ButtonAsButton extends BaseButtonProps, Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className' | 'children'> {
   as?: 'button'
   to?: never
   href?: never
+  children: ReactNode
 }
 
-interface ButtonAsLink extends BaseButtonProps, Omit<LinkProps, 'className'> {
+interface ButtonAsLink extends BaseButtonProps, Omit<LinkProps, 'className' | 'children'> {
   as: 'link'
   to: string
   href?: never
+  children: ReactNode
 }
 
-interface ButtonAsAnchor extends BaseButtonProps, Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, 'className'> {
+interface ButtonAsAnchor extends BaseButtonProps, Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, 'className' | 'children'> {
   as: 'a'
   href: string
   to?: never
+  children: ReactNode
 }
 
 type ButtonProps = ButtonAsButton | ButtonAsLink | ButtonAsAnchor
@@ -51,7 +53,7 @@ export default function Button(props: ButtonProps) {
   const classes = `${baseClasses} ${variantClasses[variant]} ${textColorClasses[variant]} ${className}`
 
   if (props.as === 'link') {
-    const { as, ...linkProps } = props
+    const { as, variant: _, disabled: __, className: ___, ...linkProps } = props
     return (
       <Link {...linkProps} className={classes} aria-disabled={disabled} style={{ color: variant === 'outline' ? undefined : '#ffffff' }}>
         {children}
@@ -60,7 +62,7 @@ export default function Button(props: ButtonProps) {
   }
 
   if (props.as === 'a') {
-    const { as, ...anchorProps } = props
+    const { as, variant: _, disabled: __, className: ___, ...anchorProps } = props
     return (
       <a {...anchorProps} className={classes} aria-disabled={disabled} style={{ color: variant === 'outline' ? undefined : '#ffffff' }}>
         {children}
@@ -68,8 +70,9 @@ export default function Button(props: ButtonProps) {
     )
   }
 
+  const { as, to, href, variant: _, disabled: __, className: ___, ...buttonProps } = props as ButtonAsButton
   return (
-    <button {...rest} className={classes} disabled={disabled} style={{ color: variant === 'outline' ? undefined : '#ffffff' }}>
+    <button {...buttonProps} className={classes} disabled={disabled} style={{ color: variant === 'outline' ? undefined : '#ffffff' }}>
       {children}
     </button>
   )
