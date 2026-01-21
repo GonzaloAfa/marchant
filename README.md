@@ -71,7 +71,7 @@ marchant/
 
 ### Prerrequisitos
 
-- **Node.js** >= 18.x
+- **Node.js** >= 20.x
 - **Yarn** (gestor de paquetes utilizado en este proyecto)
 - **MongoDB** (local o MongoDB Atlas)
 - **Git**
