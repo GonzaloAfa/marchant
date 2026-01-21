@@ -48,12 +48,12 @@ jobs:
       - name: Create S3 bucket if not exists
         run: |
           set -e
-          BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
+          S3_BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
           
           # Check if bucket exists
-          if aws s3 ls "s3://${BUCKET_NAME}" 2>&1 | grep -q 'NoSuchBucket'; then
-            echo "📦 Creating S3 bucket: ${BUCKET_NAME}"
-            aws s3 mb "s3://${BUCKET_NAME}" --region ${{ env.AWS_REGION }}
+          if aws s3 ls "s3://${S3_BUCKET_NAME}" 2>&1 | grep -q 'NoSuchBucket'; then
+            echo "📦 Creating S3 bucket: ${S3_BUCKET_NAME}"
+            aws s3 mb "s3://${S3_BUCKET_NAME}" --region ${{ env.AWS_REGION }}
             echo "✅ Bucket created"
           else
             echo "✅ Bucket already exists"
@@ -62,11 +62,11 @@ jobs:
       - name: Configure S3 bucket
         run: |
           set -e
-          BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
+          S3_BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
           
           # Enable Block Public Access (best practice)
           aws s3api put-public-access-block \
-            --bucket "${BUCKET_NAME}" \
+            --bucket "${S3_BUCKET_NAME}" \
             --public-access-block-configuration \
             "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true" \
             2>/dev/null || echo "⚠️  Could not update Block Public Access (may already be configured)"
@@ -75,8 +75,8 @@ jobs:
         id: create_oac
         run: |
           set -e
-          BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
-          OAC_NAME="OAC-${BUCKET_NAME}"
+          S3_BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
+          OAC_NAME="OAC-${S3_BUCKET_NAME}"
           
           # Check if OAC exists
           EXISTING_OAC=$(aws cloudfront list-origin-access-controls \
@@ -100,9 +100,9 @@ jobs:
       - name: Get bucket region
         id: bucket_region
         run: |
-          BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
+          S3_BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
           BUCKET_REGION=$(aws s3api get-bucket-location \
-            --bucket "${BUCKET_NAME}" \
+            --bucket "${S3_BUCKET_NAME}" \
             --query 'LocationConstraint' \
             --output text 2>/dev/null || echo "${{ env.AWS_REGION }}")
           
@@ -117,7 +117,7 @@ jobs:
         id: cloudfront
         run: |
           set -e
-          BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
+          S3_BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
           OAC_ID="${{ steps.create_oac.outputs.oac_id }}"
           BUCKET_REGION="${{ steps.bucket_region.outputs.region }}"
           DOMAIN_NAME="${{ secrets.DOMAIN_NAME }}"
@@ -125,7 +125,7 @@ jobs:
           
           # Check if distribution exists
           EXISTING_DIST=$(aws cloudfront list-distributions \
-            --query "DistributionList.Items[?Origins.Items[?contains(DomainName, '${BUCKET_NAME}.s3')]].Id" \
+            --query "DistributionList.Items[?Origins.Items[?contains(DomainName, '${S3_BUCKET_NAME}.s3')]].Id" \
             --output text | head -n 1 || echo "")
           
           if [ -n "$EXISTING_DIST" ] && [ "$EXISTING_DIST" != "None" ]; then
@@ -151,14 +151,14 @@ jobs:
             cat > /tmp/cloudfront-config.json <<EOF
           {
             "CallerReference": "$(date +%s)",
-            "Comment": "Distribution for ${BUCKET_NAME}",
+            "Comment": "Distribution for ${S3_BUCKET_NAME}",
             "DefaultRootObject": "index.html",
             ${ALIASES_CONFIG}
             "Origins": {
               "Quantity": 1,
               "Items": [{
-                "Id": "S3-${BUCKET_NAME}",
-                "DomainName": "${BUCKET_NAME}.s3.${BUCKET_REGION}.amazonaws.com",
+                "Id": "S3-${S3_BUCKET_NAME}",
+                "DomainName": "${S3_BUCKET_NAME}.s3.${BUCKET_REGION}.amazonaws.com",
                 "OriginAccessControlId": "${OAC_ID}",
                 "S3OriginConfig": {
                   "OriginAccessIdentity": ""
@@ -166,7 +166,7 @@ jobs:
               }]
             },
             "DefaultCacheBehavior": {
-              "TargetOriginId": "S3-${BUCKET_NAME}",
+              "TargetOriginId": "S3-${S3_BUCKET_NAME}",
               "ViewerProtocolPolicy": "redirect-to-https",
               "AllowedMethods": {
                 "Quantity": 2,
@@ -229,7 +229,7 @@ jobs:
               "Effect": "Allow",
               "Principal": {"Service": "cloudfront.amazonaws.com"},
               "Action": "s3:GetObject",
-              "Resource": "arn:aws:s3:::${BUCKET_NAME}/*",
+              "Resource": "arn:aws:s3:::${S3_BUCKET_NAME}/*",
               "Condition": {
                 "StringEquals": {
                   "AWS:SourceArn": "${DIST_ARN}"
@@ -241,20 +241,20 @@ jobs:
             
             # Temporarily disable BlockPublicPolicy to apply policy
             aws s3api put-public-access-block \
-              --bucket "${BUCKET_NAME}" \
+              --bucket "${S3_BUCKET_NAME}" \
               --public-access-block-configuration \
               "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=false,RestrictPublicBuckets=true" \
               2>/dev/null || true
             
             # Apply policy
             if aws s3api put-bucket-policy \
-              --bucket "${BUCKET_NAME}" \
+              --bucket "${S3_BUCKET_NAME}" \
               --policy file:///tmp/bucket-policy.json 2>/dev/null; then
               echo "✅ Bucket policy applied"
               
               # Re-enable BlockPublicPolicy
               aws s3api put-public-access-block \
-                --bucket "${BUCKET_NAME}" \
+                --bucket "${S3_BUCKET_NAME}" \
                 --public-access-block-configuration \
                 "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true" \
                 2>/dev/null || true
