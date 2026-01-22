@@ -326,6 +326,44 @@ Si sospechas que tus credenciales fueron comprometidas:
 
 ---
 
+## 🔧 Solución de Problemas
+
+### Error: "Access Denied" al desplegar a S3
+
+Si recibes un error de "Access Denied" al intentar desplegar el frontend:
+
+1. **Verifica que el bucket existe**: 
+   - Ejecuta el workflow `setup-aws-infrastructure.yml` primero si no lo has hecho
+   - O verifica manualmente en AWS Console → S3
+
+2. **Verifica los permisos IAM**: 
+   - Asegúrate de que tu usuario/rol de IAM tenga los permisos listados en la sección [Permisos IAM Requeridos](#🛡️-permisos-iam-requeridos)
+   - Específicamente para S3: `s3:ListBucket`, `s3:PutObject`, `s3:DeleteObject`, `s3:GetBucketLocation`, `s3:HeadBucket`
+
+3. **Verifica la región**: 
+   - Asegúrate de que el bucket esté en la misma región que `AWS_REGION` en el workflow (por defecto `us-east-1`)
+
+4. **Verifica el nombre del bucket**: 
+   - Confirma que `S3_BUCKET_NAME` en GitHub Secrets coincida exactamente con el nombre del bucket en AWS
+   - Los nombres de buckets son case-sensitive
+
+5. **Verifica las credenciales**: 
+   - Asegúrate de que `AWS_ACCESS_KEY_ID` y `AWS_SECRET_ACCESS_KEY` sean válidos y no hayan expirado
+
+### Error: "NoSuchBucket"
+
+Si el bucket no existe:
+1. Ejecuta el workflow `setup-aws-infrastructure.yml` manualmente desde GitHub Actions
+2. O crea el bucket manualmente en AWS Console y luego ejecuta el workflow de setup
+
+### Error: "The bucket you are attempting to access must be addressed using the specified endpoint"
+
+Este error indica que el bucket está en una región diferente. Solución:
+1. Verifica la región del bucket en AWS Console
+2. Actualiza `AWS_REGION` en el workflow o en GitHub Secrets para que coincida
+
+---
+
 ## 📞 Soporte
 
 Si tienes problemas con la configuración:

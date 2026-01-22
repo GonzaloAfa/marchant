@@ -48,20 +48,70 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Verify S3 bucket access
+        run: |
+          set -e
+          S3_BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
+          
+          if [ -z "$S3_BUCKET_NAME" ]; then
+            echo "❌ Error: S3_BUCKET_NAME secret is not set"
+            exit 1
+          fi
+          
+          echo "🔍 Verifying access to bucket: ${S3_BUCKET_NAME}"
+          
+          # Check if bucket exists and we have access
+          if aws s3 ls "s3://${S3_BUCKET_NAME}" 2>&1 | grep -q 'NoSuchBucket'; then
+            echo "❌ Error: Bucket '${S3_BUCKET_NAME}' does not exist"
+            echo "💡 Run the 'Setup AWS Infrastructure' workflow first to create the bucket"
+            exit 1
+          fi
+          
+          # Test write permissions
+          if ! aws s3api head-bucket --bucket "${S3_BUCKET_NAME}" 2>/dev/null; then
+            echo "❌ Error: No access to bucket '${S3_BUCKET_NAME}'"
+            echo "💡 Check that your AWS credentials have the following permissions:"
+            echo "   - s3:ListBucket"
+            echo "   - s3:PutObject"
+            echo "   - s3:DeleteObject"
+            echo "   - s3:GetBucketLocation"
+            exit 1
+          fi
+          
+          echo "✅ Bucket access verified"
+
       - name: Deploy to S3
         run: |
-          aws s3 sync ./src/frontend/dist s3://${{ secrets.S3_BUCKET_NAME }} \
+          set -e
+          S3_BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
+          
+          echo "📦 Deploying frontend to S3 bucket: ${S3_BUCKET_NAME}"
+          
+          # Sync static assets with long cache
+          echo "📤 Uploading static assets..."
+          aws s3 sync ./src/frontend/dist s3://${S3_BUCKET_NAME} \
             --delete \
             --cache-control "public, max-age=31536000, immutable" \
             --exclude "*.html" \
-            --exclude "service-worker.js"
+            --exclude "service-worker.js" \
+            --exclude "*.json" || {
+              echo "❌ Error syncing static assets"
+              exit 1
+            }
           
           # Upload HTML files with no cache
-          aws s3 sync ./src/frontend/dist s3://${{ secrets.S3_BUCKET_NAME }} \
+          echo "📤 Uploading HTML files..."
+          aws s3 sync ./src/frontend/dist s3://${S3_BUCKET_NAME} \
             --delete \
             --cache-control "public, max-age=0, must-revalidate" \
             --include "*.html" \
-            --include "service-worker.js"
+            --include "service-worker.js" \
+            --include "*.json" || {
+              echo "❌ Error syncing HTML files"
+              exit 1
+            }
+          
+          echo "✅ Deployment to S3 completed"
 
       - name: Invalidate CloudFront cache
         run: |
