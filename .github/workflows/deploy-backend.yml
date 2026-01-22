@@ -57,16 +57,18 @@ jobs:
             --region ${{ env.AWS_REGION }} \
             --verbose
         env:
+          # Application environment variables (passed to Lambda)
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           JWT_EXPIRES_IN: ${{ secrets.JWT_EXPIRES_IN || '24h' }}
-          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           FROM_EMAIL: ${{ secrets.FROM_EMAIL || 'noreply@marchant.com' }}
           FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
           NODE_ENV: production
           ALLOWED_ORIGINS: ${{ secrets.ALLOWED_ORIGINS || '' }}
+          LOG_LEVEL: ${{ secrets.LOG_LEVEL || 'info' }}
+          # Note: AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY are NOT passed
+          # as Lambda environment variables because they are reserved and automatically
+          # provided by AWS Lambda runtime
 
       - name: Output deployment info
         run: |

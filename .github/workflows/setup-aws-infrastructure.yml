@@ -49,14 +49,51 @@ jobs:
         run: |
           set -e
           S3_BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
+          AWS_REGION="${{ env.AWS_REGION }}"
           
-          # Check if bucket exists
-          if aws s3 ls "s3://${S3_BUCKET_NAME}" 2>&1 | grep -q 'NoSuchBucket'; then
-            echo "📦 Creating S3 bucket: ${S3_BUCKET_NAME}"
-            aws s3 mb "s3://${S3_BUCKET_NAME}" --region ${{ env.AWS_REGION }}
-            echo "✅ Bucket created"
+          if [ -z "$S3_BUCKET_NAME" ]; then
+            echo "❌ Error: S3_BUCKET_NAME secret is not set"
+            exit 1
+          fi
+          
+          echo "📦 Checking if bucket exists: ${S3_BUCKET_NAME}"
+          
+          # Check bucket existence with better error handling
+          BUCKET_CHECK=$(aws s3 ls "s3://${S3_BUCKET_NAME}" 2>&1)
+          BUCKET_CHECK_EXIT=$?
+          
+          if echo "$BUCKET_CHECK" | grep -qi "NoSuchBucket"; then
+            # Bucket doesn't exist, create it
+            echo "📦 Creating S3 bucket: ${S3_BUCKET_NAME} in region ${AWS_REGION}"
+            CREATE_OUTPUT=$(aws s3 mb "s3://${S3_BUCKET_NAME}" --region "${AWS_REGION}" 2>&1)
+            CREATE_EXIT=$?
+            
+            if [ $CREATE_EXIT -eq 0 ]; then
+              echo "✅ Bucket created successfully"
+            elif echo "$CREATE_OUTPUT" | grep -qi "BucketAlreadyOwnedByYou"; then
+              echo "✅ Bucket already exists and is owned by you"
+            elif echo "$CREATE_OUTPUT" | grep -qi "BucketAlreadyExists"; then
+              echo "❌ Error: Bucket name '${S3_BUCKET_NAME}' is already taken globally"
+              echo "💡 S3 bucket names must be unique across all AWS accounts"
+              echo "   Please choose a different bucket name and update S3_BUCKET_NAME secret"
+              exit 1
+            else
+              echo "❌ Error creating bucket: $CREATE_OUTPUT"
+              echo "💡 Possible reasons:"
+              echo "   - Invalid bucket name (must be lowercase, no spaces, 3-63 chars)"
+              echo "   - Insufficient permissions (need s3:CreateBucket)"
+              echo "   - Network or AWS service issue"
+              exit 1
+            fi
+          elif echo "$BUCKET_CHECK" | grep -qi "AccessDenied"; then
+            echo "⚠️  Warning: Cannot verify bucket existence (Access Denied)"
+            echo "💡 The bucket may exist but you don't have s3:ListBucket permission"
+            echo "   Attempting to continue - bucket may be accessible for writes"
+          elif [ $BUCKET_CHECK_EXIT -eq 0 ]; then
+            echo "✅ Bucket already exists and is accessible"
           else
-            echo "✅ Bucket already exists"
+            echo "⚠️  Warning: Unexpected response when checking bucket: $BUCKET_CHECK"
+            echo "   Attempting to continue..."
           fi
 
       - name: Configure S3 bucket

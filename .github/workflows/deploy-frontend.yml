@@ -138,34 +138,62 @@ jobs:
         run: |
           set -e
           S3_BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
+          AWS_REGION="${{ env.AWS_REGION }}"
           
           echo "📦 Deploying frontend to S3 bucket: ${S3_BUCKET_NAME}"
           
+          # Ensure bucket exists (create if it doesn't - useful for first-time deployments)
+          echo "🔍 Verifying bucket exists..."
+          BUCKET_CHECK=$(aws s3 ls "s3://${S3_BUCKET_NAME}" 2>&1)
+          if echo "$BUCKET_CHECK" | grep -qi "NoSuchBucket"; then
+            echo "⚠️  Bucket does not exist. Creating it now..."
+            if aws s3 mb "s3://${S3_BUCKET_NAME}" --region "${AWS_REGION}" 2>&1; then
+              echo "✅ Bucket created successfully"
+            elif echo "$BUCKET_CHECK" | grep -qi "BucketAlreadyExists\|BucketAlreadyOwnedByYou"; then
+              echo "✅ Bucket exists (created by another process)"
+            else
+              echo "❌ Error: Could not create bucket"
+              echo "💡 Please run 'Setup AWS Infrastructure' workflow first, or check bucket name"
+              exit 1
+            fi
+          fi
+          
+          # Verify build directory exists
+          if [ ! -d "./src/frontend/dist" ]; then
+            echo "❌ Error: Build directory not found: ./src/frontend/dist"
+            echo "💡 Make sure the build step completed successfully"
+            exit 1
+          fi
+          
           # Sync static assets with long cache
-          echo "📤 Uploading static assets..."
-          aws s3 sync ./src/frontend/dist s3://${S3_BUCKET_NAME} \
+          echo "📤 Uploading static assets (JS, CSS, images)..."
+          if aws s3 sync ./src/frontend/dist s3://${S3_BUCKET_NAME} \
             --delete \
             --cache-control "public, max-age=31536000, immutable" \
             --exclude "*.html" \
             --exclude "service-worker.js" \
-            --exclude "*.json" || {
-              echo "❌ Error syncing static assets"
-              exit 1
-            }
+            --exclude "*.json" 2>&1; then
+            echo "✅ Static assets uploaded"
+          else
+            echo "❌ Error syncing static assets"
+            exit 1
+          fi
           
           # Upload HTML files with no cache
           echo "📤 Uploading HTML files..."
-          aws s3 sync ./src/frontend/dist s3://${S3_BUCKET_NAME} \
+          if aws s3 sync ./src/frontend/dist s3://${S3_BUCKET_NAME} \
             --delete \
             --cache-control "public, max-age=0, must-revalidate" \
             --include "*.html" \
             --include "service-worker.js" \
-            --include "*.json" || {
-              echo "❌ Error syncing HTML files"
-              exit 1
-            }
+            --include "*.json" 2>&1; then
+            echo "✅ HTML files uploaded"
+          else
+            echo "❌ Error syncing HTML files"
+            exit 1
+          fi
           
-          echo "✅ Deployment to S3 completed"
+          echo "✅ Deployment to S3 completed successfully"
 
       - name: Invalidate CloudFront cache
         run: |

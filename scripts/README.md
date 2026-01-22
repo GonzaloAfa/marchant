@@ -1,185 +1,223 @@
-# Scripts de Despliegue AWS
+# 🚀 Scripts de Despliegue - Método Marchant
 
-Este directorio contiene scripts para configurar y desplegar la aplicación en AWS (S3 + CloudFront).
+> **Nota**: Este proyecto utiliza **GitHub Actions** para automatizar todos los despliegues. Los workflows están configurados en `.github/workflows/`.
 
-## Prerequisitos
+## 📋 Workflows Disponibles
 
-1. **AWS CLI instalado y configurado**
-   ```bash
-   # Instalar AWS CLI
-   curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-   unzip awscliv2.zip
-   sudo ./aws/install
-   
-   # Configurar credenciales
-   aws configure
-   ```
+### 1. Setup AWS Infrastructure (`setup-aws-infrastructure.yml`)
 
-2. **Credenciales de AWS**
-   - Access Key ID
-   - Secret Access Key
-   - Región (por defecto: us-east-1)
+**Propósito**: Configuración inicial de la infraestructura AWS (S3 + CloudFront + OAC)
 
-3. **Permisos IAM necesarios**
-   - `s3:*` (para crear y gestionar buckets)
-   - `cloudfront:*` (para crear y gestionar distribuciones)
-   - `iam:CreateRole` (si usas roles personalizados)
+**Cuándo ejecutar**:
+- Primera vez que despliegas el proyecto
+- Cuando necesitas recrear la infraestructura
+- Cuando cambias el nombre del bucket S3
 
-## Scripts Disponibles
+**Qué hace**:
+1. ✅ Crea el bucket S3 si no existe (con verificación robusta)
+2. ✅ Configura Block Public Access (mejores prácticas de seguridad)
+3. ✅ Crea Origin Access Control (OAC) para CloudFront
+4. ✅ Crea distribución CloudFront con configuración optimizada
+5. ✅ Aplica bucket policy para permitir acceso desde CloudFront
+6. ✅ Configura manejo de errores (404/403 → index.html)
 
-### 1. `setup-aws-infrastructure.sh`
+**Cómo ejecutar**:
+1. Ve a GitHub → **Actions** → **Setup AWS Infrastructure**
+2. Haz clic en **Run workflow**
+3. Selecciona qué componentes desplegar
+4. Haz clic en **Run workflow**
 
-Crea y configura la infraestructura AWS (S3 bucket + CloudFront distribution).
+**Output importante**:
+- `CLOUDFRONT_DISTRIBUTION_ID`: Cópialo y agrégalo como secret en GitHub
 
-**Uso:**
-```bash
-chmod +x scripts/setup-aws-infrastructure.sh
-./scripts/setup-aws-infrastructure.sh
-```
+---
 
-**Variables de entorno:**
-- `S3_BUCKET_NAME` (opcional, default: `alisonvivanco-website`)
-- `AWS_REGION` (opcional, default: `us-east-1`)
-- `DOMAIN_NAME` (opcional, default: `alisonvivanco.cl`)
-- `ACM_CERTIFICATE_ARN` (opcional, ARN del certificado SSL en us-east-1)
+### 2. Deploy Frontend (`deploy-frontend.yml`)
 
-**Ejemplo:**
-```bash
-S3_BUCKET_NAME=mi-website \
-AWS_REGION=us-east-1 \
-DOMAIN_NAME=alisonvivanco.cl \
-ACM_CERTIFICATE_ARN=arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012 \
-./scripts/setup-aws-infrastructure.sh
-```
+**Propósito**: Despliega el frontend a S3 e invalida CloudFront cache
 
-**Qué hace:**
-1. Crea un bucket S3 si no existe
-2. Configura el bucket para hosting estático
-3. Aplica políticas de acceso público
-4. Crea una distribución CloudFront
-5. Configura manejo de errores (404 → index.html)
+**Cuándo se ejecuta**:
+- Automáticamente: Push a `main`/`master` en `src/frontend/**`
+- Manualmente: Desde GitHub Actions → **Deploy Frontend to AWS S3 + CloudFront**
 
-### 2. `deploy.sh`
+**Qué hace**:
+1. ✅ Verifica acceso al bucket S3 (con debugging detallado)
+2. ✅ Crea el bucket automáticamente si no existe
+3. ✅ Build del frontend (React + Vite)
+4. ✅ Upload de assets estáticos con cache largo (1 año)
+5. ✅ Upload de HTML/JSON con cache corto (no cache)
+6. ✅ Invalidación de CloudFront cache
 
-Despliega el proyecto build a S3.
+**Características**:
+- Verificación robusta de bucket (maneja AccessDenied vs NoSuchBucket)
+- Creación automática de bucket si no existe
+- Verificación de región del bucket
+- Mensajes de error claros y accionables
 
-**Uso:**
-```bash
-chmod +x scripts/deploy.sh
-./scripts/deploy.sh
-```
+---
 
-**Variables de entorno:**
-- `S3_BUCKET_NAME` (opcional, default: `alisonvivanco-website`)
-- `AWS_REGION` (opcional, default: `us-east-1`)
-- `BUILD_DIR` (opcional, default: `dist`)
+### 3. Deploy Backend (`deploy-backend.yml`)
 
-**Ejemplo:**
-```bash
-S3_BUCKET_NAME=mi-website ./scripts/deploy.sh
-```
+**Propósito**: Despliega el backend a AWS Lambda usando Serverless Framework
 
-**Qué hace:**
-1. Verifica que el directorio de build existe
-2. Sincroniza archivos con S3
-3. Configura headers de cache apropiados
-4. Configura Content-Type correcto para cada tipo de archivo
+**Cuándo se ejecuta**:
+- Automáticamente: Push a `main`/`master` en `src/backend/**`
+- Manualmente: Desde GitHub Actions → **Deploy Backend to AWS Lambda**
 
-## Configuración de GitHub Actions
+**Qué hace**:
+1. ✅ Build del backend (NestJS + TypeScript)
+2. ✅ Deploy a Lambda usando Serverless Framework
+3. ✅ Configura variables de entorno (sin variables reservadas)
+4. ✅ Configura permisos IAM para SES
 
-### Secrets Requeridos
+**Características**:
+- No pasa variables reservadas de Lambda (AWS_REGION, AWS_ACCESS_KEY_ID, etc.)
+- Permisos IAM configurados automáticamente para SES
+- Logging estructurado (JSON en producción, coloreado en desarrollo)
 
-Agrega estos secrets en tu repositorio de GitHub (Settings → Secrets and variables → Actions):
+---
 
-1. **AWS_ACCESS_KEY_ID**: Tu Access Key ID de AWS
-2. **AWS_SECRET_ACCESS_KEY**: Tu Secret Access Key de AWS
-3. **S3_BUCKET_NAME**: Nombre del bucket S3 (ej: `alisonvivanco-website`)
-4. **CLOUDFRONT_DISTRIBUTION_ID**: ID de la distribución CloudFront (se obtiene después de ejecutar `setup-aws-infrastructure.sh`)
-5. **ACM_CERTIFICATE_ARN** (opcional): ARN del certificado SSL en us-east-1 para el dominio `alisonvivanco.cl`
+## 🔑 Secrets Requeridos
 
-> **Nota sobre SSL**: Si no proporcionas `ACM_CERTIFICATE_ARN`, el script creará la distribución sin SSL. Puedes agregarlo después siguiendo la guía en `docs/DOMAIN-SETUP.md`.
+Consulta `GITHUB_SECRETS.md` para la lista completa de secrets necesarios.
 
-### Workflow
+**Mínimos requeridos**:
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `S3_BUCKET_NAME`
+- `MONGODB_URI`
+- `JWT_SECRET`
+- `FRONTEND_URL`
+- `VITE_API_URL`
 
-El workflow `.github/workflows/deploy.yml` se ejecuta automáticamente cuando:
-- Se hace push a `main` o `master`
-- Se ejecuta manualmente desde GitHub Actions
+**Opcionales**:
+- `CLOUDFRONT_DISTRIBUTION_ID` (se obtiene después del setup inicial)
+- `DOMAIN_NAME` (para dominio personalizado)
+- `ACM_CERTIFICATE_ARN` (para SSL personalizado)
 
-### Pasos del Workflow
+---
 
-1. Checkout del código
-2. Setup de Node.js
-3. Instalación de dependencias
-4. Build del proyecto
-5. Configuración de credenciales AWS
-6. Setup de infraestructura (si es necesario)
-7. Despliegue a S3
-8. Invalidación de cache de CloudFront
+## 🎓 Aprendizajes Clave
 
-## Flujo de Trabajo Completo
+### 1. Verificación de Bucket S3
 
-### Primera vez (Setup inicial)
+**Problema**: AWS a veces devuelve "Access Denied" en lugar de "NoSuchBucket" por seguridad.
 
-1. **Crear infraestructura:**
-   ```bash
-   ./scripts/setup-aws-infrastructure.sh
-   ```
+**Solución**: Verificación robusta que:
+- Intenta múltiples métodos de verificación
+- Distingue entre "bucket no existe" vs "sin permisos"
+- Proporciona mensajes de error claros y accionables
 
-2. **Obtener el Distribution ID de CloudFront:**
-   ```bash
-   aws cloudfront list-distributions --query "DistributionList.Items[*].[Id,DomainName]" --output table
-   ```
+### 2. Creación Automática de Bucket
 
-3. **Agregar secrets a GitHub:**
-   - Ve a Settings → Secrets and variables → Actions
-   - Agrega los secrets mencionados arriba
+**Problema**: El bucket puede no existir en el primer deploy.
 
-4. **Hacer push a main/master:**
-   ```bash
-   git push origin main
-   ```
+**Solución**: Los workflows verifican y crean el bucket automáticamente si no existe.
 
-### Despliegues subsecuentes
+### 3. Variables Reservadas de Lambda
 
-Simplemente haz push a `main` o `master` y el workflow se ejecutará automáticamente.
+**Problema**: Lambda no permite configurar `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` como variables de entorno.
 
-## Troubleshooting
+**Solución**: Estas variables se obtienen automáticamente del runtime de Lambda. No se pasan en `serverless.yml`.
 
-### Error: "Bucket already exists"
-- El bucket ya existe. Esto es normal si ya ejecutaste el script antes.
+### 4. Origin Access Control (OAC)
 
-### Error: "Access Denied"
-- Verifica que tus credenciales AWS tengan los permisos necesarios.
-- Verifica que el bucket policy permita acceso público.
+**Problema**: OAI (Origin Access Identity) está deprecado.
+
+**Solución**: Usar OAC (Origin Access Control) que es más moderno y seguro.
+
+### 5. Verificación de Región
+
+**Problema**: El bucket puede estar en una región diferente a la esperada.
+
+**Solución**: Los workflows detectan y verifican la región del bucket automáticamente.
+
+---
+
+## 🔧 Troubleshooting
+
+### Error: "Access Denied" al desplegar a S3
+
+**Causas posibles**:
+1. El bucket no existe → El workflow lo creará automáticamente
+2. El bucket está en otra región → Verifica la región en AWS Console
+3. Permisos IAM insuficientes → Verifica que tengas `AmazonS3FullAccess` o permisos específicos
+4. Bucket policy bloqueando acceso → Verifica la política del bucket
+
+**Solución**: El workflow ahora proporciona debugging detallado que indica exactamente qué está fallando.
+
+### Error: "Bucket name already exists globally"
+
+**Causa**: Los nombres de bucket S3 deben ser únicos en todo AWS.
+
+**Solución**: Elige un nombre diferente y actualiza el secret `S3_BUCKET_NAME`.
+
+### Error: "Lambda was unable to configure your environment variables because the environment variables you have provided contains reserved keys"
+
+**Causa**: Intentaste pasar variables reservadas de Lambda.
+
+**Solución**: Ya está corregido. El workflow no pasa variables reservadas.
 
 ### CloudFront tarda mucho en desplegarse
-- Es normal. CloudFront puede tardar 15-20 minutos en desplegarse completamente.
-- Puedes verificar el estado con:
-  ```bash
-  aws cloudfront get-distribution --id YOUR_DISTRIBUTION_ID
-  ```
 
-### Los cambios no se ven después del despliegue
-- CloudFront cachea los archivos. El workflow invalida el cache automáticamente.
-- Si necesitas invalidar manualmente:
-  ```bash
-  aws cloudfront create-invalidation \
-    --distribution-id YOUR_DISTRIBUTION_ID \
-    --paths "/*"
-  ```
+**Normal**: CloudFront puede tardar 15-20 minutos en desplegarse completamente.
 
-## URLs
+**Verificación**: 
+```bash
+aws cloudfront get-distribution --id YOUR_DISTRIBUTION_ID --query 'Distribution.Status'
+```
 
-Después del setup, tendrás acceso a:
+---
 
-- **S3 Website URL**: `http://BUCKET_NAME.s3-website-REGION.amazonaws.com`
-- **CloudFront URL**: `https://DISTRIBUTION_ID.cloudfront.net`
-- **Dominio personalizado**: `https://alisonvivanco.cl` (después de configurar DNS y SSL)
+## 📚 Documentación Relacionada
 
-> Ver `docs/DOMAIN-SETUP.md` para instrucciones completas sobre cómo configurar el dominio personalizado.
+- `GITHUB_SECRETS.md`: Configuración completa de secrets
+- `ENV_TEMPLATE.md`: Variables de entorno locales
+- `README.md`: Documentación general del proyecto
+- `QUICK_START.md`: Guía de inicio rápido
 
-## Costos Estimados
+---
 
-- **S3**: ~$0.023 por GB almacenado + $0.0004 por 1,000 requests
-- **CloudFront**: ~$0.085 por GB transferido (primeros 10TB)
-- **Total estimado**: < $5/mes para tráfico bajo-medio
+## 🚀 Flujo de Trabajo Recomendado
+
+### Primera Vez (Setup Inicial)
+
+1. **Configurar GitHub Secrets**:
+   - Ve a Settings → Secrets and variables → Actions
+   - Agrega todos los secrets requeridos (ver `GITHUB_SECRETS.md`)
+
+2. **Ejecutar Setup de Infraestructura**:
+   - Ve a Actions → **Setup AWS Infrastructure**
+   - Ejecuta el workflow manualmente
+   - Copia el `CLOUDFRONT_DISTRIBUTION_ID` de los logs
+   - Agrégalo como secret en GitHub
+
+3. **Verificar Despliegue**:
+   - Haz push a `main` para desplegar frontend y backend
+   - O ejecuta los workflows manualmente
+
+### Despliegues Subsecuentes
+
+Simplemente haz push a `main` o `master`:
+- Cambios en `src/frontend/**` → Deploy automático de frontend
+- Cambios en `src/backend/**` → Deploy automático de backend
+
+---
+
+## 💡 Mejores Prácticas
+
+1. **Siempre verifica los logs** del workflow si algo falla
+2. **No hardcodees secrets** en el código
+3. **Usa nombres de bucket únicos** (pueden incluir tu nombre o proyecto)
+4. **Mantén los secrets actualizados** (rota credenciales periódicamente)
+5. **Revisa los permisos IAM** si hay errores de acceso
+
+---
+
+## 📞 Soporte
+
+Si tienes problemas:
+1. Revisa los logs del workflow en GitHub Actions
+2. Verifica que todos los secrets estén configurados
+3. Consulta `GITHUB_SECRETS.md` para troubleshooting detallado
+4. Verifica los permisos IAM en AWS Console
