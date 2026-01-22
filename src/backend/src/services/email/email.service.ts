@@ -15,18 +15,29 @@ export class EmailService {
   ) {
     this.fromEmail = this.configService.get('FROM_EMAIL', 'noreply@marchant.com');
     
-    // Initialize AWS SES if credentials are provided
-    const awsRegion = this.configService.get('AWS_REGION', 'us-east-1');
-    const awsAccessKeyId = this.configService.get('AWS_ACCESS_KEY_ID');
-    const awsSecretAccessKey = this.configService.get('AWS_SECRET_ACCESS_KEY');
+    // Initialize AWS SES
+    // In Lambda, AWS_REGION is automatically available via process.env
+    // In local dev, we can use AWS_REGION from ConfigService or env vars
+    // Credentials are automatically provided by Lambda IAM role, or from env vars in local dev
+    const awsRegion = process.env.AWS_REGION || this.configService.get('AWS_REGION', 'us-east-1');
+    const awsAccessKeyId = process.env.AWS_ACCESS_KEY_ID || this.configService.get('AWS_ACCESS_KEY_ID');
+    const awsSecretAccessKey = process.env.AWS_SECRET_ACCESS_KEY || this.configService.get('AWS_SECRET_ACCESS_KEY');
     
+    // In Lambda, credentials come from IAM role, so we don't need to pass them explicitly
+    // In local dev, we can pass credentials if provided
     if (awsAccessKeyId && awsSecretAccessKey) {
+      // Local development: use explicit credentials
       this.sesClient = new SESClient({
         region: awsRegion,
         credentials: {
           accessKeyId: awsAccessKeyId,
           secretAccessKey: awsSecretAccessKey,
         },
+      });
+    } else {
+      // Lambda: use IAM role credentials (automatic)
+      this.sesClient = new SESClient({
+        region: awsRegion,
       });
     }
   }

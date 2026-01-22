@@ -14,14 +14,20 @@ provider:
     MONGODB_URI: ${env:MONGODB_URI}
     JWT_SECRET: ${env:JWT_SECRET}
     JWT_EXPIRES_IN: ${env:JWT_EXPIRES_IN, '24h'}
-    AWS_REGION: ${env:AWS_REGION, 'us-east-1'}
-    AWS_ACCESS_KEY_ID: ${env:AWS_ACCESS_KEY_ID, ''}
-    AWS_SECRET_ACCESS_KEY: ${env:AWS_SECRET_ACCESS_KEY, ''}
     FROM_EMAIL: ${env:FROM_EMAIL, 'noreply@marchant.com'}
     FRONTEND_URL: ${env:FRONTEND_URL}
     ALLOWED_ORIGINS: ${env:ALLOWED_ORIGINS, ''}
+    LOG_LEVEL: ${env:LOG_LEVEL, 'info'}
   httpApi:
     cors: true
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - ses:SendEmail
+            - ses:SendRawEmail
+          Resource: '*'
 
 functions:
   api:
