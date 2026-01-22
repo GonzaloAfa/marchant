@@ -50,8 +50,9 @@ jobs:
 
       - name: Verify S3 bucket access
         run: |
-          set -e
+          set +e  # Don't exit on error, we want to capture and display them
           S3_BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
+          AWS_REGION="${{ env.AWS_REGION }}"
           
           if [ -z "$S3_BUCKET_NAME" ]; then
             echo "❌ Error: S3_BUCKET_NAME secret is not set"
@@ -59,26 +60,79 @@ jobs:
           fi
           
           echo "🔍 Verifying access to bucket: ${S3_BUCKET_NAME}"
+          echo "📍 Region: ${AWS_REGION}"
           
-          # Check if bucket exists and we have access
-          if aws s3 ls "s3://${S3_BUCKET_NAME}" 2>&1 | grep -q 'NoSuchBucket'; then
-            echo "❌ Error: Bucket '${S3_BUCKET_NAME}' does not exist"
-            echo "💡 Run the 'Setup AWS Infrastructure' workflow first to create the bucket"
+          # Get current AWS identity for debugging
+          echo ""
+          echo "🔐 Current AWS identity:"
+          IDENTITY=$(aws sts get-caller-identity 2>&1)
+          if [ $? -eq 0 ]; then
+            echo "$IDENTITY" | jq '.' || echo "$IDENTITY"
+          else
+            echo "❌ Error: Cannot get AWS identity"
+            echo "$IDENTITY"
             exit 1
           fi
           
-          # Test write permissions
-          if ! aws s3api head-bucket --bucket "${S3_BUCKET_NAME}" 2>/dev/null; then
-            echo "❌ Error: No access to bucket '${S3_BUCKET_NAME}'"
-            echo "💡 Check that your AWS credentials have the following permissions:"
-            echo "   - s3:ListBucket"
-            echo "   - s3:PutObject"
-            echo "   - s3:DeleteObject"
-            echo "   - s3:GetBucketLocation"
-            exit 1
+          # Check if bucket exists - try s3 ls first (most reliable)
+          echo ""
+          echo "📦 Checking if bucket exists..."
+          LS_OUTPUT=$(aws s3 ls "s3://${S3_BUCKET_NAME}" 2>&1)
+          LS_EXIT_CODE=$?
+          
+          if [ $LS_EXIT_CODE -eq 0 ]; then
+            echo "✅ Bucket exists and is accessible via s3 ls"
+            echo "   Contents:"
+            echo "$LS_OUTPUT" | head -5 || echo "   (empty or cannot list)"
+          else
+            # Check the error type
+            if echo "$LS_OUTPUT" | grep -qi "NoSuchBucket"; then
+              echo "❌ Error: Bucket '${S3_BUCKET_NAME}' does not exist"
+              echo "💡 Run the 'Setup AWS Infrastructure' workflow first to create the bucket"
+              exit 1
+            elif echo "$LS_OUTPUT" | grep -qi "AccessDenied"; then
+              echo "❌ Error: Access denied to bucket '${S3_BUCKET_NAME}'"
+              echo ""
+              echo "🔍 Debugging information:"
+              echo "   Error: $LS_OUTPUT"
+              echo ""
+              echo "💡 Possible causes:"
+              echo "   1. Bucket policy is blocking access"
+              echo "   2. Bucket is in a different region (check bucket region in AWS Console)"
+              echo "   3. IAM permissions not properly attached (even with AmazonS3FullAccess)"
+              echo ""
+              echo "🔧 Try these steps:"
+              echo "   1. Verify bucket exists: aws s3 ls | grep ${S3_BUCKET_NAME}"
+              echo "   2. Check bucket region: aws s3api get-bucket-location --bucket ${S3_BUCKET_NAME}"
+              echo "   3. Try with explicit region: aws s3 ls s3://${S3_BUCKET_NAME} --region <bucket-region>"
+              exit 1
+            else
+              echo "❌ Error: Cannot access bucket '${S3_BUCKET_NAME}'"
+              echo "   Error details: $LS_OUTPUT"
+              exit 1
+            fi
           fi
           
-          echo "✅ Bucket access verified"
+          # Try to get bucket location to verify region
+          echo ""
+          echo "📍 Checking bucket region..."
+          BUCKET_REGION=$(aws s3api get-bucket-location --bucket "${S3_BUCKET_NAME}" --output text 2>&1)
+          if [ $? -eq 0 ]; then
+            # us-east-1 returns "None" or empty
+            if [ -z "$BUCKET_REGION" ] || [ "$BUCKET_REGION" = "None" ]; then
+              BUCKET_REGION="us-east-1"
+            fi
+            echo "   Bucket region: ${BUCKET_REGION}"
+            if [ "$BUCKET_REGION" != "$AWS_REGION" ]; then
+              echo "⚠️  Warning: Bucket region (${BUCKET_REGION}) differs from workflow region (${AWS_REGION})"
+              echo "   This might cause issues. Consider updating AWS_REGION or bucket region."
+            fi
+          else
+            echo "⚠️  Could not determine bucket region: $BUCKET_REGION"
+          fi
+          
+          echo ""
+          echo "✅ Bucket access verified - proceeding with deployment"
 
       - name: Deploy to S3
         run: |
